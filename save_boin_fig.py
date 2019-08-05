@@ -10,7 +10,7 @@ import csv
 import wave
 import struct
 
-fr=10000 #44100
+fr=16384 #10000 #44100
 p=pyaudio.PyAudio()
 sec=0.25
 CHUNK=int(fr*sec)  #1024*N
@@ -69,7 +69,7 @@ while stream.is_active():
     bin_wave,sin_wave = readcsv(path,sk)
     output =stream.write(bin_wave)
 
-    sig1=sig.reshape(50,50) #50000*0.05=2500
+    sig1=sig.reshape(64,64) #50000*0.05=2500
     #print(sig1.shape)
     ax1.plot(t,sig)
     ax2.plot(t,sin_wave)
