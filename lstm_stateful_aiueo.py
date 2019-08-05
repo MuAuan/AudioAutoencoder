@@ -30,7 +30,7 @@ stream=p.open(	format = pyaudio.paInt16,
 		output = True) # inputとoutputを同時にTrueにする
 
 # length of input
-input_len = 1000
+input_len = 4096*15 #1000
 
 # e.g. if tsteps=2 and input=[1, 2, 3, 4, 5],
 #      then output=[1.5, 2.5, 3.5, 4.5]
@@ -41,7 +41,7 @@ lahead = 1
 
 # training parameters passed to "model.fit(...)"
 batch_size = 1
-epochs = 10
+epochs = 3 #10
 
 # ------------
 # MAIN PROGRAM
@@ -136,26 +136,17 @@ def readcsv_(path,sk):
     #print(binwave)
     return binwave,sin_wave
 
-def readcsv(path,sk):
-    #print("Input data path:  " + path)
-    with open(path+str(sk)+'.txt', 'r', newline='\n', encoding="utf-8") as f:
-        reader = csv.reader(f, lineterminator='\n') # 改行コード（\n）を指定しておく
-        Row=[]
-        for row in reader:
-            Row.append(row)
-    return Row
-
 to_drop = max(tsteps - 1, lahead - 1)
 sin_wave=[]
 list_=('a','e','i','o','u')
-for sky in range(0,5,1):
-    sky=list_[sky]
-    for sk in range(0,10,1):
+for sk in range(0,3,1):
+    for sky in range(0,5,1):
+        sky=list_[sky]
         b,x_ = readcsv_("./aiueo/sig_0730/"+sky+"_64x64/boin_fig",sk)
         sin_wave += x_
 for i in range(len(sin_wave)):
     sin_wave[i]=sin_wave[i]/32762.
-sky='_all'
+sky='_all_05'
 print(sin_wave)        
 #sin_wave = [int(float(x)* 32767.0) for x in sin_wave]        
 data_input = pd.DataFrame(sin_wave)
@@ -188,8 +179,8 @@ print('Output tail: ')
 print(expected_output.tail())
 
 print('Plotting input and expected output')
-plt.plot(data_input[0][:100], '.')  #10
-plt.plot(expected_output[0][:100], '-')  #10
+plt.plot(data_input[0][:1000], '.')  #10
+plt.plot(expected_output[0][:1000], '-')  #10
 plt.legend(['Input', 'Expected output'])
 plt.title('Input')
 #plt.show()
@@ -211,39 +202,47 @@ model_stateful = create_model(stateful=True)
 
 
 # split train/test data
-def split_data(x, y, ratio=0.8):
+def split_data(x, y, ratio=0.33): #0.8
     to_train = int(input_len * ratio)
     # tweak to match with batch_size
-    to_train -= to_train % batch_size
+    #to_train -= to_train % batch_size
+    to_test = int(input_len * ratio*2)
 
+    
     x_train = x[:to_train]
     y_train = y[:to_train]
-    x_test = x[to_train:]
-    y_test = y[to_train:]
-
+    x_test = x[to_train:to_test]
+    y_test = y[to_train:to_test]
+    x_val =  x[to_test:]
+    y_val =  y[to_test:]
     # tweak to match with batch_size
-    to_drop = x.shape[0] % batch_size
+    #to_drop = x.shape[0] % batch_size
+    """
     if to_drop > 0:
         x_test = x_test[:-1 * to_drop]
         y_test = y_test[:-1 * to_drop]
-
+    """
     # some reshaping
     reshape_3 = lambda x: x.values.reshape((x.shape[0], x.shape[1], 1))
     x_train = reshape_3(x_train)
     x_test = reshape_3(x_test)
+    x_val = reshape_3(x_val)
 
     reshape_2 = lambda x: x.values.reshape((x.shape[0], 1))
     y_train = reshape_2(y_train)
     y_test = reshape_2(y_test)
+    y_val = reshape_2(y_val)
 
-    return (x_train, y_train), (x_test, y_test)
+    return (x_train, y_train), (x_test, y_test), (x_val, y_val)
 
 
-(x_train, y_train), (x_test, y_test) = split_data(data_input, expected_output)
+(x_train, y_train), (x_test, y_test), (x_val, y_val) = split_data(data_input, expected_output)
 print('x_train.shape: ', x_train.shape)
 print('y_train.shape: ', y_train.shape)
 print('x_test.shape: ', x_test.shape)
 print('y_test.shape: ', y_test.shape)
+print('x_val.shape: ', x_val.shape)
+print('y_val.shape: ', y_val.shape)
 
 sin_wave=y_test
 sin_wave = [np.clip(int(float(x)* 32767.0 ),-32768,32767) for x in sin_wave] 
@@ -268,7 +267,7 @@ for i in range(epochs):
     model_stateful.reset_states()
 
 print('Predicting')
-predicted_stateful = model_stateful.predict(x_test, batch_size=batch_size)
+predicted_stateful = model_stateful.predict(x_val, batch_size=batch_size)
 
 print('Creating Stateless Model...')
 model_stateless = create_model(stateful=False)
@@ -285,7 +284,7 @@ model_stateless.fit(x_train,
 model_stateless.save_weights('./aiueo/sig_0730/lstm_stateless'+str(sky)+'_epoch_.hdf5', True)
 
 print('Predicting')
-predicted_stateless = model_stateless.predict(x_test, batch_size=batch_size)
+predicted_stateless = model_stateless.predict(x_val, batch_size=batch_size)
 
 # ----------------------------
 """
@@ -310,20 +309,20 @@ print('Plotting Results')
 plt.subplot(3, 1, 1)
 plt.plot(y_test[:1000])
 plt.title('Expected')
-y_min=min(y_test)
-y_max=max(y_test)
+y_min=min(y_val)
+y_max=max(y_val)
 plt.ylim(y_min-0.01,y_max+0.01)
 plt.subplot(3, 1, 2)
 # drop the first "tsteps-1" because it is not possible to predict them
 # since the "previous" timesteps to use do not exist
 #plt.plot((y_test - predicted_stateful).flatten()[tsteps - 1:1000])
 plt.plot((predicted_stateful).flatten()[tsteps - 1:1000])
-plt.title('Stateful: Expected - Predicted')
+plt.title('Stateful: Predicted')
 #plt.ylim(y_min-0.01,y_max+0.01)
 plt.subplot(3, 1, 3)
 #plt.plot((y_test - predicted_stateless).flatten()[0:1000])
 plt.plot((predicted_stateless).flatten()[0:1000])
-plt.title('Stateless: Expected - Predicted')
+plt.title('Stateless: Predicted')
 #plt.ylim(y_min-0.01,y_max+0.01)
 #plt.show()
 plt.savefig('./aiueo/sig_0730/Stateful'+str(sky)+'.jpg')
